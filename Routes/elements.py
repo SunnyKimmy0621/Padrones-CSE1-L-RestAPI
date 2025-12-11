@@ -1,18 +1,16 @@
 from dicttoxml import dicttoxml
-from flask import Response
-from flask import Blueprint, request, jsonify
-from flask_mysqldb import MySQL
+from flask import Response, Blueprint, request, jsonify
 from flask_jwt_extended import create_access_token, jwt_required
 
-elements_bp = Blueprint('elements', __name__)
-mysql = None
+elements_bp = Blueprint('elements_bp', __name__)
+elements_bp.mysql = None  
 
 #HOME
 @elements_bp.route('/')
 def home():
     return jsonify({"message": "CS New REST API is running"})
 
-#LOGIN (Generate JWT Token)
+#LOGIN (Generates the JWT Token)
 @elements_bp.route('/login', methods=['POST'])
 def login():
     data = request.get_json()
@@ -21,14 +19,13 @@ def login():
     password = data.get("password")
 
     if username == "USER" and password == "USER123":
-        access_token = create_access_token(identity=username)
-        return jsonify({"token": access_token}), 200
+        token = create_access_token(identity=username)
+        return jsonify({"token": token}), 200
 
     return jsonify({"error": "Invalid username or password"}), 401
 
-#GET ALL
+#GET ALL (public)
 @elements_bp.route('/api/elements', methods=['GET'])
-@jwt_required()
 def get_elements():
     try:
         format_type = request.args.get('format', 'json')
@@ -36,33 +33,26 @@ def get_elements():
         cur = elements_bp.mysql.connection.cursor()
         cur.execute("SELECT * FROM element")
         rows = cur.fetchall()
-
-        elements = []
-        for row in rows:
-            elements.append({
-                "element_id": row[0],
-                "element": row[1],
-                "element_state": row[2]
-            })
-
         cur.close()
 
-        # JSON OUTPUT (default)
+        elements = [
+            {"element_id": r[0], "element": r[1], "element_state": r[2]}
+            for r in rows
+        ]
+
         if format_type == "json":
             return jsonify(elements), 200
 
-        # XML OUTPUT
         elif format_type == "xml":
             xml_data = dicttoxml(elements, custom_root='elements', attr_type=False)
             return Response(xml_data, mimetype='application/xml')
 
-        else:
-            return jsonify({"error": "Invalid format. Use xml or json."}), 400
+        return jsonify({"error": "Invalid format. Use xml or json."}), 400
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-#GET BY ID
+#GET BY ID (public)
 @elements_bp.route('/api/elements/<int:element_id>', methods=['GET'])
 def get_element(element_id):
     try:
@@ -82,17 +72,14 @@ def get_element(element_id):
             "element_state": row[2]
         }
 
-        # JSON OUTPUT
         if format_type == "json":
             return jsonify(element_data), 200
 
-        # XML OUTPUT
         elif format_type == "xml":
             xml_data = dicttoxml(element_data, custom_root='element', attr_type=False)
             return Response(xml_data, mimetype='application/xml')
 
-        else:
-            return jsonify({"error": "Invalid format. Use xml or json."}), 400
+        return jsonify({"error": "Invalid format. Use xml or json."}), 400
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -112,7 +99,7 @@ def add_element():
             "INSERT INTO element (element, element_state) VALUES (%s, %s)",
             (data['element'], data['element_state'])
         )
-        mysql.connection.commit()
+        elements_bp.mysql.connection.commit()
         new_id = cur.lastrowid
         cur.close()
 
@@ -139,13 +126,13 @@ def update_element(element_id):
             "UPDATE element SET element=%s, element_state=%s WHERE element_id=%s",
             (data['element'], data['element_state'], element_id)
         )
-        mysql.connection.commit()
+        elements_bp.mysql.connection.commit()
+        affected = cur.rowcount
+        cur.close()
 
-        if cur.rowcount == 0:
-            cur.close()
+        if affected == 0:
             return jsonify({"error": "Element not found"}), 404
 
-        cur.close()
         return jsonify({"message": "Element updated successfully"}), 200
 
     except Exception as e:
@@ -157,52 +144,54 @@ def update_element(element_id):
 def delete_element(element_id):
     try:
         cur = elements_bp.mysql.connection.cursor()
-        cur.execute("DELETE FROM element WHERE element_id=%s", (element_id,))
-        mysql.connection.commit()
+        cur.execute("DELETE FROM element WHERE element_id = %s", (element_id,))
+        elements_bp.mysql.connection.commit()
+        affected = cur.rowcount
+        cur.close()
 
-        if cur.rowcount == 0:
-            cur.close()
+        if affected == 0:
             return jsonify({"error": "Element not found"}), 404
 
-        cur.close()
         return jsonify({"message": "Element deleted successfully"}), 200
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-    
-#SEARCH (GET)
+
+#SEARCH (public)
 @elements_bp.route('/api/elements/search', methods=['GET'])
-@jwt_required()
 def search_elements():
     query = request.args.get('query')
+    format_type = request.args.get('format', 'json')
 
     if not query:
         return jsonify({"error": "Search query parameter is required"}), 400
 
     try:
         cur = elements_bp.mysql.connection.cursor()
-        like_query = f"%{query}%"
-        
+        like = f"%{query}%"
         cur.execute("""
-            SELECT * FROM element 
+            SELECT * FROM element
             WHERE element LIKE %s OR element_state LIKE %s
-        """, (like_query, like_query))
-        
+        """, (like, like))
         rows = cur.fetchall()
         cur.close()
 
-        if not rows:
+        results = [
+            {"element_id": r[0], "element": r[1], "element_state": r[2]}
+            for r in rows
+        ]
+
+        if not results:
             return jsonify({"message": "No elements found"}), 404
 
-        results = []
-        for row in rows:
-            results.append({
-                "element_id": row[0],
-                "element": row[1],
-                "element_state": row[2]
-            })
+        if format_type == "json":
+            return jsonify(results), 200
 
-        return jsonify(results), 200
+        elif format_type == "xml":
+            xml_data = dicttoxml(results, custom_root="search_results", attr_type=False)
+            return Response(xml_data, mimetype="application/xml")
+
+        return jsonify({"error": "Invalid format. Use xml or json."}), 400
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
