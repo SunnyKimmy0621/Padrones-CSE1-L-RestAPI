@@ -5,14 +5,14 @@ from flask_mysqldb import MySQL
 from flask_jwt_extended import create_access_token, jwt_required
 
 elements_bp = Blueprint('elements', __name__)
-mysql = MySQL()
+mysql = None
 
-# HOME
+#HOME
 @elements_bp.route('/')
 def home():
     return jsonify({"message": "CS New REST API is running"})
 
-# LOGIN (Generate JWT Token)
+#LOGIN (Generate JWT Token)
 @elements_bp.route('/login', methods=['POST'])
 def login():
     data = request.get_json()
@@ -26,14 +26,14 @@ def login():
 
     return jsonify({"error": "Invalid username or password"}), 401
 
-
-# GET ALL
+#GET ALL
 @elements_bp.route('/api/elements', methods=['GET'])
+@jwt_required()
 def get_elements():
     try:
         format_type = request.args.get('format', 'json')
 
-        cur = mysql.connection.cursor()
+        cur = elements_bp.mysql.connection.cursor()
         cur.execute("SELECT * FROM element")
         rows = cur.fetchall()
 
@@ -62,13 +62,13 @@ def get_elements():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# GET BY ID
+#GET BY ID
 @elements_bp.route('/api/elements/<int:element_id>', methods=['GET'])
 def get_element(element_id):
     try:
         format_type = request.args.get('format', 'json')
 
-        cur = mysql.connection.cursor()
+        cur = elements_bp.mysql.connection.cursor()
         cur.execute("SELECT * FROM element WHERE element_id = %s", (element_id,))
         row = cur.fetchone()
         cur.close()
@@ -97,8 +97,9 @@ def get_element(element_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# CREATE
+#CREATE (POST)
 @elements_bp.route('/api/elements', methods=['POST'])
+@jwt_required()
 def add_element():
     data = request.get_json()
 
@@ -106,7 +107,7 @@ def add_element():
         return jsonify({"error": "Invalid input"}), 400
 
     try:
-        cur = mysql.connection.cursor()
+        cur = elements_bp.mysql.connection.cursor()
         cur.execute(
             "INSERT INTO element (element, element_state) VALUES (%s, %s)",
             (data['element'], data['element_state'])
@@ -123,8 +124,9 @@ def add_element():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# UPDATE
+#UPDATE (PUT)
 @elements_bp.route('/api/elements/<int:element_id>', methods=['PUT'])
+@jwt_required()
 def update_element(element_id):
     data = request.get_json()
 
@@ -132,7 +134,7 @@ def update_element(element_id):
         return jsonify({"error": "Invalid input"}), 400
 
     try:
-        cur = mysql.connection.cursor()
+        cur = elements_bp.mysql.connection.cursor()
         cur.execute(
             "UPDATE element SET element=%s, element_state=%s WHERE element_id=%s",
             (data['element'], data['element_state'], element_id)
@@ -149,11 +151,12 @@ def update_element(element_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# DELETE
+#DELETE
 @elements_bp.route('/api/elements/<int:element_id>', methods=['DELETE'])
+@jwt_required()
 def delete_element(element_id):
     try:
-        cur = mysql.connection.cursor()
+        cur = elements_bp.mysql.connection.cursor()
         cur.execute("DELETE FROM element WHERE element_id=%s", (element_id,))
         mysql.connection.commit()
 
@@ -169,6 +172,7 @@ def delete_element(element_id):
     
 #SEARCH (GET)
 @elements_bp.route('/api/elements/search', methods=['GET'])
+@jwt_required()
 def search_elements():
     query = request.args.get('query')
 
@@ -176,7 +180,7 @@ def search_elements():
         return jsonify({"error": "Search query parameter is required"}), 400
 
     try:
-        cur = mysql.connection.cursor()
+        cur = elements_bp.mysql.connection.cursor()
         like_query = f"%{query}%"
         
         cur.execute("""
