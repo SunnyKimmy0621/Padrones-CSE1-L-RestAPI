@@ -1,5 +1,8 @@
+from dicttoxml import dicttoxml
+from flask import Response
 from flask import Blueprint, request, jsonify
 from flask_mysqldb import MySQL
+from flask_jwt_extended import create_access_token, jwt_required
 
 elements_bp = Blueprint('elements', __name__)
 mysql = MySQL()
@@ -9,10 +12,27 @@ mysql = MySQL()
 def home():
     return jsonify({"message": "CS New REST API is running"})
 
+# LOGIN (Generate JWT Token)
+@elements_bp.route('/login', methods=['POST'])
+def login():
+    data = request.get_json()
+
+    username = data.get("username")
+    password = data.get("password")
+
+    if username == "USER" and password == "USER123":
+        access_token = create_access_token(identity=username)
+        return jsonify({"token": access_token}), 200
+
+    return jsonify({"error": "Invalid username or password"}), 401
+
+
 # GET ALL
 @elements_bp.route('/api/elements', methods=['GET'])
 def get_elements():
     try:
+        format_type = request.args.get('format', 'json')
+
         cur = mysql.connection.cursor()
         cur.execute("SELECT * FROM element")
         rows = cur.fetchall()
@@ -26,7 +46,18 @@ def get_elements():
             })
 
         cur.close()
-        return jsonify(elements), 200
+
+        # JSON OUTPUT (default)
+        if format_type == "json":
+            return jsonify(elements), 200
+
+        # XML OUTPUT
+        elif format_type == "xml":
+            xml_data = dicttoxml(elements, custom_root='elements', attr_type=False)
+            return Response(xml_data, mimetype='application/xml')
+
+        else:
+            return jsonify({"error": "Invalid format. Use xml or json."}), 400
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -35,6 +66,8 @@ def get_elements():
 @elements_bp.route('/api/elements/<int:element_id>', methods=['GET'])
 def get_element(element_id):
     try:
+        format_type = request.args.get('format', 'json')
+
         cur = mysql.connection.cursor()
         cur.execute("SELECT * FROM element WHERE element_id = %s", (element_id,))
         row = cur.fetchone()
@@ -43,11 +76,23 @@ def get_element(element_id):
         if row is None:
             return jsonify({"error": "Element not found"}), 404
 
-        return jsonify({
+        element_data = {
             "element_id": row[0],
             "element": row[1],
             "element_state": row[2]
-        }), 200
+        }
+
+        # JSON OUTPUT
+        if format_type == "json":
+            return jsonify(element_data), 200
+
+        # XML OUTPUT
+        elif format_type == "xml":
+            xml_data = dicttoxml(element_data, custom_root='element', attr_type=False)
+            return Response(xml_data, mimetype='application/xml')
+
+        else:
+            return jsonify({"error": "Invalid format. Use xml or json."}), 400
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -121,9 +166,9 @@ def delete_element(element_id):
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
+    
 #SEARCH (GET)
-@app.route('/api/elements/search', methods=['GET'])
+@elements_bp.route('/api/elements/search', methods=['GET'])
 def search_elements():
     query = request.args.get('query')
 
